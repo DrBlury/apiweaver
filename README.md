@@ -5,13 +5,15 @@
 
 ## Table of Contents
 
-1. [Highlights](#highlights)
-2. [Packages at a Glance](#packages-at-a-glance)
-3. [Install](#install)
-4. [Quick Start](#quick-start)
-5. [Health, Docs & Probes](#health-docs--probes)
-6. [Tooling & Generation](#tooling--generation)
-7. [Development](#development)
+- [APIWeaver](#apiweaver)
+  - [Table of Contents](#table-of-contents)
+  - [Highlights](#highlights)
+  - [Packages at a Glance](#packages-at-a-glance)
+  - [Install](#install)
+  - [Quick Start](#quick-start)
+  - [Health, Docs \& Probes](#health-docs--probes)
+  - [Tooling \& Generation](#tooling--generation)
+  - [Development](#development)
 
 ## Highlights
 
