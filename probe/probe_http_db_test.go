@@ -80,7 +80,9 @@ func TestNewHTTPProbe(t *testing.T) {
 			if r.Method != http.MethodGet {
 				t.Fatalf("expected GET request, got %s", r.Method)
 			}
-			io.WriteString(w, "ok")
+			if _, err := io.WriteString(w, "ok"); err != nil {
+				t.Fatalf("failed to write response: %v", err)
+			}
 		}))
 		defer server.Close()
 
@@ -118,6 +120,74 @@ func TestNewHTTPProbe(t *testing.T) {
 		}
 		if !errors.Is(err, sentinel) {
 			t.Fatalf("expected wrapped sentinel, got %v", err)
+		}
+	})
+
+	t.Run("custom status expectation", func(t *testing.T) {
+		resp := &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Body:       io.NopCloser(strings.NewReader("retry")),
+		}
+		client := &stubHTTPClient{resp: resp}
+		probeFunc := NewHTTPProbe(
+			"docs",
+			http.MethodGet,
+			"https://example.invalid",
+			client,
+			WithHTTPAllowedStatuses(http.StatusTooManyRequests),
+		)
+		if err := probeFunc(context.Background()); err != nil {
+			t.Fatalf("expected probe to accept 429, got %v", err)
+		}
+	})
+
+	t.Run("request mutator runs", func(t *testing.T) {
+		reqCapture := make(http.Header)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqCapture = r.Header.Clone()
+		}))
+		defer server.Close()
+
+		probeFunc := NewHTTPProbe(
+			"docs",
+			http.MethodGet,
+			server.URL,
+			nil,
+			WithHTTPRequestMutator(func(req *http.Request) error {
+				req.Header.Set("Authorization", "Bearer test")
+				return nil
+			}),
+		)
+		if err := probeFunc(context.Background()); err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+		if reqCapture.Get("Authorization") != "Bearer test" {
+			t.Fatalf("expected Authorization header to be set, got %q", reqCapture.Get("Authorization"))
+		}
+	})
+
+	t.Run("response validator failure bubbles up", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Metric", "missing")
+		}))
+		defer server.Close()
+
+		expected := errors.New("missing metric")
+		probeFunc := NewHTTPProbe(
+			"docs",
+			http.MethodGet,
+			server.URL,
+			nil,
+			WithHTTPResponseValidator(func(resp *http.Response) error {
+				if resp.Header.Get("X-Metric") == "missing" {
+					return expected
+				}
+				return nil
+			}),
+		)
+		err := probeFunc(context.Background())
+		if !errors.Is(err, expected) {
+			t.Fatalf("expected validator error, got %v", err)
 		}
 	})
 }

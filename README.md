@@ -11,6 +11,8 @@
   - [Packages at a Glance](#packages-at-a-glance)
   - [Install](#install)
   - [Quick Start](#quick-start)
+  - [Examples](#examples)
+  - [Router](#router)
   - [Health, Docs \& Probes](#health-docs--probes)
   - [Tooling \& Generation](#tooling--generation)
   - [Development](#development)
@@ -35,6 +37,7 @@
 | `info` | Status/version endpoints, OpenAPI JSON + HTML viewer, build metadata. |
 | `probe` | Ready-made checks for databases or custom closures wired to HTTP. |
 | `jsonutil` | Tiny helpers around sonic for fast (un)marshalling. |
+| `router` | ServeMux with OpenAPI validation, CORS, timeout, and logging defaults via functional options. |
 
 Each package can be imported independently, keeping binaries trim and focused.
 
@@ -45,6 +48,7 @@ go get github.com/drblury/apiweaver/responder
 go get github.com/drblury/apiweaver/info
 go get github.com/drblury/apiweaver/probe
 go get github.com/drblury/apiweaver/jsonutil
+go get github.com/drblury/apiweaver/router
 ```
 
 > Requires Go 1.21+ (module declares 1.25) so you can rely on the latest stdlib
@@ -95,6 +99,66 @@ mux.HandleFunc("/openapi.json", infoHandler.GetOpenAPIJSON)
 
 Share the same `Responder` anywhere you need consistent tracing metadata or
 error semantics (routers, middleware, background workers, etc.).
+
+## Examples
+
+Every package now includes runnable `Example*` functions demonstrating typical
+and optional advanced integrations. Execute them directly via `go test`:
+
+```bash
+go test ./info     -run Example
+go test ./jsonutil -run Example
+go test ./responder -run Example
+go test ./router   -run Example
+go test ./probe    -run Example
+```
+
+Refer to the following table to jump into a concrete scenario:
+
+| Package | Example Highlights |
+| --- | --- |
+| `info` | Wires `InfoHandler` with custom base URL, swagger provider, and probes, then exercises `/healthz` + `/version`. |
+| `jsonutil` | Demonstrates struct marshal/unmarshal plus streaming `Encode`/`Decode`. |
+| `responder` | End-to-end handler showing request decoding, validation, custom error classification, and structured problem payloads. |
+| `router` | Builds a mux with OpenAPI validation, logger, tuned CORS, timeout, and prepend/append middlewares. |
+| `probe` | Covers generic ping probes plus configurable HTTP checks (status windows, request mutators, response validators) via `NewHTTPProbe`. |
+
+The examples double as documentation for `go doc`, so you can read and run them
+without scaffolding a separate binary.
+
+## Router
+
+`router.New` wraps your generated handlers with a configurable middleware
+stack—OpenAPI validation, CORS, per-request timeouts, and structured logging are
+enabled by default and can be reordered or replaced via functional options.
+
+```go
+swagger, _ := openapi3.NewLoader().LoadFromFile("./internal/server/_gen/openapi.json")
+
+mux := router.New(
+  generatedHandler,
+  router.WithSwagger(swagger),
+  router.WithLogger(logger),
+  router.WithConfig(router.Config{
+    Timeout: 5 * time.Second,
+    CORS: router.CORSConfig{
+      Origins: []string{"https://app.example.com"},
+      Methods: []string{"GET", "POST"},
+      Headers: []string{"Content-Type", "Authorization"},
+      AllowCredentials: true,
+    },
+    QuietdownRoutes: []string{"/status"},
+    HideHeaders:     []string{"Authorization"},
+  }),
+  router.WithMiddlewares(metricsMiddleware),
+)
+
+http.ListenAndServe(":8080", mux)
+```
+
+Additional helpers (`router.WithTrailingMiddlewares`,
+`router.WithMiddlewareChain`, `router.Without*`) make it easy to blend your own
+middleware with the built-in defaults.
 
 ## Health, Docs & Probes
 

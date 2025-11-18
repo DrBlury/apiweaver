@@ -13,7 +13,7 @@ func (ih *InfoHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 // GetHealthz implements the liveness probe recommended for Kubernetes.
 func (ih *InfoHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 	if err := ih.runChecks(r.Context(), ih.livenessChecks); err != nil {
-		ih.Responder.HandleAPIError(w, r, http.StatusServiceUnavailable, err, "liveness probe failed")
+		ih.HandleAPIError(w, r, http.StatusServiceUnavailable, err, "liveness probe failed")
 		return
 	}
 	ih.respondProbe(w, r, http.StatusOK, "ok")
@@ -22,7 +22,7 @@ func (ih *InfoHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 // GetReadyz implements the readiness probe recommended for Kubernetes.
 func (ih *InfoHandler) GetReadyz(w http.ResponseWriter, r *http.Request) {
 	if err := ih.runChecks(r.Context(), ih.readinessChecks); err != nil {
-		ih.Responder.HandleAPIError(w, r, http.StatusServiceUnavailable, err, "readiness probe failed")
+		ih.HandleAPIError(w, r, http.StatusServiceUnavailable, err, "readiness probe failed")
 		return
 	}
 	ih.respondProbe(w, r, http.StatusOK, "ready")
@@ -34,7 +34,7 @@ func (ih *InfoHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 	if payload == nil {
 		payload = map[string]string{}
 	}
-	ih.Responder.RespondWithJSON(w, r, http.StatusOK, payload)
+	ih.RespondWithJSON(w, r, http.StatusOK, payload)
 }
 
 // GetOpenAPIJSON streams the configured OpenAPI JSON document to the caller.
@@ -43,12 +43,12 @@ func (ih *InfoHandler) GetOpenAPIJSON(w http.ResponseWriter, r *http.Request) {
 
 	bytes, err := ih.swaggerProvider()
 	if err != nil {
-		ih.Responder.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to load swagger spec")
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to load swagger spec")
 		return
 	}
 
 	if _, err = w.Write(bytes); err != nil {
-		ih.Responder.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to write swagger response")
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to write swagger response")
 		return
 	}
 }
@@ -59,7 +59,7 @@ func (ih *InfoHandler) GetOpenAPIHTML(w http.ResponseWriter, r *http.Request) {
 
 	if ih.openapiTemplate == nil {
 		err := errors.New("openapi template not configured")
-		ih.Responder.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to render openapi template")
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to render openapi template")
 		return
 	}
 
@@ -72,7 +72,7 @@ func (ih *InfoHandler) GetOpenAPIHTML(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ih.openapiTemplate.Execute(w, data); err != nil {
-		ih.Responder.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to render openapi template")
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to render openapi template")
 		return
 	}
 }

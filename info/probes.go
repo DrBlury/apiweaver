@@ -17,7 +17,7 @@ func (ih *InfoHandler) respondProbe(w http.ResponseWriter, r *http.Request, stat
 	if len(details) > 0 {
 		payload.Details = append(payload.Details, details...)
 	}
-	ih.Responder.RespondWithJSON(w, r, statusCode, payload)
+	ih.RespondWithJSON(w, r, statusCode, payload)
 }
 
 func (ih *InfoHandler) runChecks(ctx context.Context, checks []ProbeFunc) error {

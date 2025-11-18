@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/drblury/apiweaver/probe"
@@ -20,6 +22,14 @@ type stubMongoPinger struct {
 func (s *stubMongoPinger) Ping(ctx context.Context, rp *readpref.ReadPref) error {
 	s.lastCtx = ctx
 	s.lastReadPF = rp
+	return s.err
+}
+
+type stubDB struct {
+	err error
+}
+
+func (s *stubDB) PingContext(ctx context.Context) error {
 	return s.err
 }
 
@@ -104,6 +114,67 @@ func ExampleNewPingProbe() {
 	probeFunc := probe.NewPingProbe("noop", func(ctx context.Context) error {
 		return nil
 	})
+	fmt.Println(probeFunc(context.Background()))
+	// Output: <nil>
+}
+
+func ExampleNewDBPingProbe() {
+	probeFunc := probe.NewDBPingProbe("postgres", &stubDB{})
+	fmt.Println(probeFunc(context.Background()))
+	// Output: <nil>
+}
+
+func ExampleNewHTTPProbe_defaultClient() {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	probeFunc := probe.NewHTTPProbe("docs", http.MethodGet, ts.URL, nil)
+	fmt.Println(probeFunc(context.Background()))
+	// Output: <nil>
+}
+
+func ExampleNewHTTPProbe() {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "ok")
+	}))
+	defer server.Close()
+
+	probeFunc := probe.NewHTTPProbe("docs", http.MethodGet, server.URL, server.Client())
+	fmt.Println(probeFunc(context.Background()))
+	// Output: <nil>
+}
+
+func ExampleNewHTTPProbe_withOptions() {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer demo" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("X-Version", "123")
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	probeFunc := probe.NewHTTPProbe(
+		"docs",
+		http.MethodGet,
+		server.URL,
+		nil,
+		probe.WithHTTPRequestMutator(func(req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer demo")
+			return nil
+		}),
+		probe.WithHTTPAllowedStatuses(http.StatusAccepted),
+		probe.WithHTTPResponseValidator(func(resp *http.Response) error {
+			if resp.Header.Get("X-Version") == "" {
+				return errors.New("missing version header")
+			}
+			return nil
+		}),
+	)
+
 	fmt.Println(probeFunc(context.Background()))
 	// Output: <nil>
 }

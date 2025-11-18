@@ -31,11 +31,9 @@ type HTTPDoer interface {
 func NewPingProbe(name string, fn PingFunc) Func {
 	return func(ctx context.Context) error {
 		if fn == nil {
-			return fmt.Errorf("%s probe: ping function is nil", name)
+			return nilComponentError(name, "ping function")
 		}
-		if ctx == nil {
-			ctx = context.Background()
-		}
+		ctx = contextOrBackground(ctx)
 
 		if err := fn(ctx); err != nil {
 			return fmt.Errorf("%s probe failed: %w", name, err)
@@ -57,9 +55,7 @@ func NewMongoPingProbe(client MongoPinger, readPref *readpref.ReadPref) Func {
 			return errors.New("mongo probe: client is nil")
 		}
 
-		if ctx == nil {
-			ctx = context.Background()
-		}
+		ctx = contextOrBackground(ctx)
 
 		rp := readPref
 		if rp == nil {
@@ -77,11 +73,9 @@ func NewMongoPingProbe(client MongoPinger, readPref *readpref.ReadPref) Func {
 func NewDBPingProbe(name string, db DBPinger) Func {
 	return func(ctx context.Context) error {
 		if db == nil {
-			return fmt.Errorf("%s probe: db client is nil", name)
+			return nilComponentError(name, "db client")
 		}
-		if ctx == nil {
-			ctx = context.Background()
-		}
+		ctx = contextOrBackground(ctx)
 
 		if err := db.PingContext(ctx); err != nil {
 			return fmt.Errorf("%s probe failed: %w", name, err)
@@ -92,7 +86,7 @@ func NewDBPingProbe(name string, db DBPinger) Func {
 
 // NewHTTPProbe creates a Func that performs an HTTP request against the supplied endpoint.
 // The probe succeeds when the response status code is within the 2xx range.
-func NewHTTPProbe(name, method, target string, client HTTPDoer) Func {
+func NewHTTPProbe(name, method, target string, client HTTPDoer, opts ...HTTPProbeOption) Func {
 	return func(ctx context.Context) error {
 		trimmedTarget := strings.TrimSpace(target)
 		if trimmedTarget == "" {
@@ -104,29 +98,33 @@ func NewHTTPProbe(name, method, target string, client HTTPDoer) Func {
 			verb = http.MethodGet
 		}
 
-		if ctx == nil {
-			ctx = context.Background()
-		}
+		ctx = contextOrBackground(ctx)
 
 		req, err := http.NewRequestWithContext(ctx, verb, trimmedTarget, nil)
 		if err != nil {
 			return fmt.Errorf("%s probe: failed to build request: %w", name, err)
 		}
 
-		d := client
-		if d == nil {
-			d = http.DefaultClient
+		cfg := buildHTTPProbeConfig(client, opts...)
+
+		if err := cfg.applyMutators(req); err != nil {
+			return fmt.Errorf("%s probe: request mutation failed: %w", name, err)
 		}
 
-		resp, err := d.Do(req)
+		resp, err := cfg.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("%s probe request failed: %w", name, err)
 		}
 		defer resp.Body.Close()
-		io.Copy(io.Discard, resp.Body)
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("%s probe received status %d", name, resp.StatusCode)
+		if err := cfg.validateResponse(resp); err != nil {
+			return fmt.Errorf("%s probe: %w", name, err)
+		}
+
+		if cfg.drainResponse {
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				return fmt.Errorf("%s probe: failed to drain response body: %w", name, err)
+			}
 		}
 		return nil
 	}

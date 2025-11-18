@@ -199,97 +199,106 @@ func TestInfoHandler_GetOpenAPIJSON(t *testing.T) {
 }
 
 func TestInfoHandler_GetOpenAPIHTML(t *testing.T) {
-	t.Run("renders template with custom data", func(t *testing.T) {
-		tmpl := template.Must(template.New("test").Parse(`{{.BaseURL}}|{{.Value}}`))
-		called := false
-		handler := NewInfoHandler(
-			WithBaseURL("https://docs.example"),
-			WithOpenAPITemplate(tmpl),
-			WithOpenAPITemplateData(func(r *http.Request, base string) any {
-				called = true
-				if base != "https://docs.example" {
-					t.Fatalf("expected base URL to be forwarded")
-				}
-				return map[string]string{
-					"BaseURL": base,
-					"Value":   "custom",
-				}
-			}),
-		)
-		req := httptest.NewRequest(http.MethodGet, "/docs", nil)
-		rr := httptest.NewRecorder()
+	t.Run("renders template with custom data", testGetOpenAPIHTMLCustomData)
+	t.Run("falls back to default data provider", testGetOpenAPIHTMLDefaultData)
+	t.Run("missing template returns problem response", testGetOpenAPIHTMLMissingTemplate)
+	t.Run("template execution errors are surfaced", testGetOpenAPIHTMLTemplateError)
+}
 
-		handler.GetOpenAPIHTML(rr, req)
+func testGetOpenAPIHTMLCustomData(t *testing.T) {
+	t.Helper()
+	tmpl := template.Must(template.New("test").Parse(`{{.BaseURL}}|{{.Value}}`))
+	called := false
+	handler := NewInfoHandler(
+		WithBaseURL("https://docs.example"),
+		WithOpenAPITemplate(tmpl),
+		WithOpenAPITemplateData(func(r *http.Request, base string) any {
+			called = true
+			if base != "https://docs.example" {
+				t.Fatalf("expected base URL to be forwarded")
+			}
+			return map[string]string{
+				"BaseURL": base,
+				"Value":   "custom",
+			}
+		}),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	rr := httptest.NewRecorder()
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		if rr.Header().Get("Content-Type") != "text/html" {
-			t.Fatalf("expected text/html content type, got %s", rr.Header().Get("Content-Type"))
-		}
-		if !called {
-			t.Fatal("expected template data provider to be called")
-		}
-		if strings.TrimSpace(rr.Body.String()) != "https://docs.example|custom" {
-			t.Fatalf("unexpected body %q", rr.Body.String())
-		}
-	})
+	handler.GetOpenAPIHTML(rr, req)
 
-	t.Run("falls back to default data provider", func(t *testing.T) {
-		tmpl := template.Must(template.New("test").Parse(`{{.BaseURL}}`))
-		handler := NewInfoHandler(
-			WithBaseURL("https://fallback"),
-			WithOpenAPITemplate(tmpl),
-			WithOpenAPITemplateData(func(*http.Request, string) any { return nil }),
-		)
-		req := httptest.NewRequest(http.MethodGet, "/docs", nil)
-		rr := httptest.NewRecorder()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+	if rr.Header().Get("Content-Type") != "text/html" {
+		t.Fatalf("expected text/html content type, got %s", rr.Header().Get("Content-Type"))
+	}
+	if !called {
+		t.Fatal("expected template data provider to be called")
+	}
+	if strings.TrimSpace(rr.Body.String()) != "https://docs.example|custom" {
+		t.Fatalf("unexpected body %q", rr.Body.String())
+	}
+}
 
-		handler.GetOpenAPIHTML(rr, req)
+func testGetOpenAPIHTMLDefaultData(t *testing.T) {
+	t.Helper()
+	tmpl := template.Must(template.New("test").Parse(`{{.BaseURL}}`))
+	handler := NewInfoHandler(
+		WithBaseURL("https://fallback"),
+		WithOpenAPITemplate(tmpl),
+		WithOpenAPITemplateData(func(*http.Request, string) any { return nil }),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	rr := httptest.NewRecorder()
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
-		}
-		if strings.TrimSpace(rr.Body.String()) != "https://fallback" {
-			t.Fatalf("expected body to use base url, got %q", rr.Body.String())
-		}
-	})
+	handler.GetOpenAPIHTML(rr, req)
 
-	t.Run("missing template returns problem response", func(t *testing.T) {
-		handler := NewInfoHandler()
-		handler.openapiTemplate = nil
-		req := httptest.NewRequest(http.MethodGet, "/docs", nil)
-		rr := httptest.NewRecorder()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+	if strings.TrimSpace(rr.Body.String()) != "https://fallback" {
+		t.Fatalf("expected body to use base url, got %q", rr.Body.String())
+	}
+}
 
-		handler.GetOpenAPIHTML(rr, req)
+func testGetOpenAPIHTMLMissingTemplate(t *testing.T) {
+	t.Helper()
+	handler := NewInfoHandler()
+	handler.openapiTemplate = nil
+	req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	rr := httptest.NewRecorder()
 
-		if rr.Code != http.StatusInternalServerError {
-			t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rr.Code)
-		}
-		problem := decodeProblemDetails(t, rr.Body.Bytes())
-		if !strings.Contains(problem.Detail, "openapi template not configured") {
-			t.Fatalf("unexpected problem detail %q", problem.Detail)
-		}
-	})
+	handler.GetOpenAPIHTML(rr, req)
 
-	t.Run("template execution errors are surfaced", func(t *testing.T) {
-		tmpl := template.Must(template.New("test").Funcs(template.FuncMap{
-			"boom": func() (string, error) {
-				return "", errors.New("render failure")
-			},
-		}).Parse(`{{boom}}`))
-		handler := NewInfoHandler(WithOpenAPITemplate(tmpl))
-		req := httptest.NewRequest(http.MethodGet, "/docs", nil)
-		rr := httptest.NewRecorder()
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rr.Code)
+	}
+	problem := decodeProblemDetails(t, rr.Body.Bytes())
+	if !strings.Contains(problem.Detail, "openapi template not configured") {
+		t.Fatalf("unexpected problem detail %q", problem.Detail)
+	}
+}
 
-		handler.GetOpenAPIHTML(rr, req)
+func testGetOpenAPIHTMLTemplateError(t *testing.T) {
+	t.Helper()
+	tmpl := template.Must(template.New("test").Funcs(template.FuncMap{
+		"boom": func() (string, error) {
+			return "", errors.New("render failure")
+		},
+	}).Parse(`{{boom}}`))
+	handler := NewInfoHandler(WithOpenAPITemplate(tmpl))
+	req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	rr := httptest.NewRecorder()
 
-		if rr.Code != http.StatusInternalServerError {
-			t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rr.Code)
-		}
-		problem := decodeProblemDetails(t, rr.Body.Bytes())
-		if !strings.Contains(problem.Detail, "render failure") {
-			t.Fatalf("expected detail to include render failure, got %q", problem.Detail)
-		}
-	})
+	handler.GetOpenAPIHTML(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rr.Code)
+	}
+	problem := decodeProblemDetails(t, rr.Body.Bytes())
+	if !strings.Contains(problem.Detail, "render failure") {
+		t.Fatalf("expected detail to include render failure, got %q", problem.Detail)
+	}
 }
