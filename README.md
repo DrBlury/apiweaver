@@ -1,81 +1,87 @@
-# API Package
+# APIWeaver
 
-## Overview
+> Composable building blocks for resilient Go APIs: consistent responders,
+> self-documenting info endpoints, and pragmatic health probes.
 
-The `api` module now provides focused subpackages that can be pulled in
-individually:
+## Table of Contents
 
-- `responder`: consistent JSON error envelopes and structured logging via
-  `Responder`.
-- `info`: lightweight health, version, and documentation endpoints powered by
-  `InfoHandler`.
-- `probe`: helper adapters for wiring database or custom checks into
-  readiness/liveness probes.
-- Tooling integration (`go:generate`) sits at the package root and keeps the
-  generated API handlers in sync with the specification.
+1. [Highlights](#highlights)
+2. [Packages at a Glance](#packages-at-a-glance)
+3. [Install](#install)
+4. [Quick Start](#quick-start)
+5. [Health, Docs & Probes](#health-docs--probes)
+6. [Tooling & Generation](#tooling--generation)
+7. [Development](#development)
 
-The package embraces the **functional options** pattern so callers can opt in to
-optional collaborators without juggling long parameter lists.
+## Highlights
 
-## Key Components
+- Functional options everywhere; wire only the collaborators you care about.
+- Shared `Responder` keeps JSON envelopes, trace IDs, and structured logs in
+  sync across handlers.
+- `InfoHandler` exposes `/status`, `/version`, and `/docs` (with an embedded
+  OpenAPI viewer) in just a few lines.
+- Probe adapters convert database/client checks into HTTP-friendly readiness
+  handlers.
+- Lightweight helpers (`jsonutil`) wrap [sonic](https://github.com/bytedance/sonic)
+  for high-throughput encoding without sprinkling boilerplate through your code.
 
-### Responder
+## Packages at a Glance
 
-`Responder` (imported from `pkg/api/responder`) wraps common HTTP tasks such as
-rendering JSON, decoding request bodies, and emitting structured error payloads.
-Errors are enriched with a ULID, category, timestamp, and log metadata so they
-remain traceable across systems. `WithStatusMetadata` lets you override the
-logging level or error labels for individual HTTP status codes.
+| Package | What it solves |
+| --- | --- |
+| `responder` | JSON rendering, error envelopes, request decoding, metadata + ULIDs. |
+| `info` | Status/version endpoints, OpenAPI JSON + HTML viewer, build metadata. |
+| `probe` | Ready-made checks for databases or custom closures wired to HTTP. |
+| `jsonutil` | Tiny helpers around sonic for fast (un)marshalling. |
 
-### InfoHandler
+Each package can be imported independently, keeping binaries trim and focused.
 
-`InfoHandler` (imported from `pkg/api/info`) combines the generated handlers
-with convenience endpoints that expose build metadata (`GET /version`), health
-information (`GET /status`), and an HTML viewer for your OpenAPI document.
-Collaborators are injected via `InfoOption` values so the handler can be
-assembled with only the bits you need.
+## Install
 
-### Generation Workflow
+```bash
+go get github.com/drblury/apiweaver/responder
+go get github.com/drblury/apiweaver/info
+go get github.com/drblury/apiweaver/probe
+go get github.com/drblury/apiweaver/jsonutil
+```
 
-The `generate.go` file wires `go generate` to a Dockerised instance of
-`oapi-codegen`. Run `task gen-api` (as defined in `taskfile.yml`) whenever the
-OpenAPI specification changes to refresh the generated server stubs. The
-embedded HTML assets under `embedded/` are served by the info handler.
+> Requires Go 1.21+ (module declares 1.25) so you can rely on the latest stdlib
+> improvements and generics.
 
-## Usage Example
+## Quick Start
 
 ```go
 import (
-  "html/template"
-  "net/http"
+    "net/http"
 
-  "github.com/drblury/apiweaver/api/info"
-  "github.com/drblury/apiweaver/api/responder"
+    "github.com/drblury/apiweaver/info"
+    "github.com/drblury/apiweaver/probe"
+    "github.com/drblury/apiweaver/responder"
 )
 
 resp := responder.NewResponder(
-  responder.WithLogger(logger),
+    responder.WithLogger(logger),
+    responder.WithStatusMetadata(http.StatusBadRequest, responder.Metadata{
+        Level: "warn",
+        Label: "validation",
+    }),
 )
 
 infoHandler := info.NewInfoHandler(
-  info.WithInfoResponder(resp),
-  info.WithBaseURL("https://api.example.com"),
-  info.WithInfoProvider(func() any {
-    return map[string]string{
-      "version": version,
-      "commit":  commit,
-    }
-  }),
-  info.WithSwaggerProvider(func() ([]byte, error) {
-    return embeddedSpec, nil
-  }),
-  info.WithOpenAPITemplate(template.Must(template.ParseFiles("./docs/viewer.html"))),
-  info.WithOpenAPITemplateData(func(_ *http.Request, baseURL string) any {
-    return map[string]any{
-      "BaseURL": baseURL,
-      "SpecURL": baseURL + "/info/openapi.json",
-    }
-  }),
+    info.WithInfoResponder(resp),
+    info.WithBaseURL("https://api.example.com"),
+    info.WithInfoProvider(func() any {
+        return map[string]string{
+            "version": version,
+            "commit":  commit,
+        }
+    }),
+    info.WithSwaggerProvider(func() ([]byte, error) {
+        return embeddedSpec, nil
+    }),
+    info.WithReadinessChecks(
+        probe.NewMongoPingProbe(mongoClient, nil),
+    ),
 )
 
 mux := http.NewServeMux()
@@ -85,26 +91,40 @@ mux.HandleFunc("/docs", infoHandler.GetOpenAPIHTML)
 mux.HandleFunc("/openapi.json", infoHandler.GetOpenAPIJSON)
 ```
 
-### Probe Helpers
+Share the same `Responder` anywhere you need consistent tracing metadata or
+error semantics (routers, middleware, background workers, etc.).
 
-Readiness or liveness checks can be composed with the helper probes bundled in
-`pkg/api/probe`. For MongoDB you can reuse the existing client connection:
+## Health, Docs & Probes
 
-```go
-mongoProbe := probe.NewMongoPingProbe(mongoClient, nil)
+- **HTML docs**: An embedded Stoplight viewer (`info/assets/stoplight.html`)
+  serves your OpenAPI spec without extra tooling.
+- **JSON docs**: Provide a `SwaggerProvider` (or `OpenAPIProvider`) to serve the
+  raw spec alongside the viewer.
+- **Readiness/Liveness**: Compose the built-in probes (`probe` package) or pass
+  your own `func(context.Context) error` implementations. Failures are surfaced
+  via the responder with correlation IDs intact.
+- **Reverse proxies**: set `info.WithBaseURL` so generated links point to the
+  external host.
 
-infoHandler := info.NewInfoHandler(
-  info.WithReadinessChecks(mongoProbe),
-)
+## Tooling & Generation
+
+- `task gen-api` (from `taskfile.yml`) runs the Dockerised `oapi-codegen`
+  pipeline described in `generate.go` to keep server stubs current.
+- Generated assets and the documentation viewer live under `info/assets/` and
+  are embedded so you can ship a single binary.
+
+## Development
+
+```bash
+# Run unit tests for every package
+go test ./...
+
+# Regenerate OpenAPI-based handlers and assets
+task gen-api
 ```
 
-## Integration Notes
-
-- The responder is transport agnostic and can be shared across handlers to keep
-  error semantics consistent.
-- Pair the info handler with the router package to get request validation and
-  logging out of the box.
-- When running behind a reverse proxy, set `WithBaseURL` so the HTML viewer
-  fetches the specification from the correct origin.
-- Use `WithOpenAPITemplate` and `WithOpenAPITemplateData` when you need to swap
-  in a bespoke HTML shell or tweak the render-time context.
+- Keep `docs.go` (this repo) updated as packages evolve so `go doc` stays
+  helpful.
+- Pair `info` with your router package of choice for validation, logging, or
+  other cross-cutting plugins.
+- Contributions welcome—open an issue or PR before making large changes.
