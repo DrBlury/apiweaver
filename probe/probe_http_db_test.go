@@ -68,126 +68,141 @@ func TestNewDBPingProbe(t *testing.T) {
 }
 
 func TestNewHTTPProbe(t *testing.T) {
-	t.Run("requires target", func(t *testing.T) {
-		probeFunc := NewHTTPProbe("search", http.MethodGet, "", nil)
-		if err := probeFunc(context.Background()); err == nil {
-			t.Fatal("expected error when target missing")
-		}
-	})
+	t.Run("requires target", testHTTPProbeRequiresTarget)
+	t.Run("success with default client", testHTTPProbeSuccessWithDefaultClient)
+	t.Run("non success status fails", testHTTPProbeNonSuccessStatusFails)
+	t.Run("request failure is propagated", testHTTPProbeRequestFailurePropagates)
+	t.Run("custom status expectation", testHTTPProbeCustomStatusExpectation)
+	t.Run("request mutator runs", testHTTPProbeRequestMutatorRuns)
+	t.Run("response validator failure bubbles up", testHTTPProbeResponseValidatorFailure)
+}
 
-	t.Run("success with default client", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet {
-				t.Fatalf("expected GET request, got %s", r.Method)
+func testHTTPProbeRequiresTarget(t *testing.T) {
+	t.Helper()
+	probeFunc := NewHTTPProbe("search", http.MethodGet, "", nil)
+	if err := probeFunc(context.Background()); err == nil {
+		t.Fatal("expected error when target missing")
+	}
+}
+
+func testHTTPProbeSuccessWithDefaultClient(t *testing.T) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", r.Method)
+		}
+		if _, err := io.WriteString(w, "ok"); err != nil {
+			t.Fatalf("failed to write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	probeFunc := NewHTTPProbe("docs", "", server.URL, nil)
+	if err := probeFunc(nil); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func testHTTPProbeNonSuccessStatusFails(t *testing.T) {
+	t.Helper()
+	resp := &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Body:       io.NopCloser(strings.NewReader("oops")),
+	}
+	client := &stubHTTPClient{resp: resp}
+	probeFunc := NewHTTPProbe("docs", http.MethodHead, "https://example.invalid", client)
+
+	err := probeFunc(context.Background())
+	if err == nil {
+		t.Fatal("expected error when status not 2xx")
+	}
+	if client.lastReq == nil || client.lastReq.Method != http.MethodHead {
+		t.Fatalf("expected HEAD request, got %+v", client.lastReq)
+	}
+}
+
+func testHTTPProbeRequestFailurePropagates(t *testing.T) {
+	t.Helper()
+	sentinel := errors.New("network down")
+	client := &stubHTTPClient{err: sentinel}
+	probeFunc := NewHTTPProbe("docs", http.MethodGet, "https://example.invalid", client)
+
+	err := probeFunc(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected wrapped sentinel, got %v", err)
+	}
+}
+
+func testHTTPProbeCustomStatusExpectation(t *testing.T) {
+	t.Helper()
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Body:       io.NopCloser(strings.NewReader("retry")),
+	}
+	client := &stubHTTPClient{resp: resp}
+	probeFunc := NewHTTPProbe(
+		"docs",
+		http.MethodGet,
+		"https://example.invalid",
+		client,
+		WithHTTPAllowedStatuses(http.StatusTooManyRequests),
+	)
+	if err := probeFunc(context.Background()); err != nil {
+		t.Fatalf("expected probe to accept 429, got %v", err)
+	}
+}
+
+func testHTTPProbeRequestMutatorRuns(t *testing.T) {
+	t.Helper()
+	reqCapture := make(http.Header)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCapture = r.Header.Clone()
+	}))
+	defer server.Close()
+
+	probeFunc := NewHTTPProbe(
+		"docs",
+		http.MethodGet,
+		server.URL,
+		nil,
+		WithHTTPRequestMutator(func(req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer test")
+			return nil
+		}),
+	)
+	if err := probeFunc(context.Background()); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if reqCapture.Get("Authorization") != "Bearer test" {
+		t.Fatalf("expected Authorization header to be set, got %q", reqCapture.Get("Authorization"))
+	}
+}
+
+func testHTTPProbeResponseValidatorFailure(t *testing.T) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Metric", "missing")
+	}))
+	defer server.Close()
+
+	expected := errors.New("missing metric")
+	probeFunc := NewHTTPProbe(
+		"docs",
+		http.MethodGet,
+		server.URL,
+		nil,
+		WithHTTPResponseValidator(func(resp *http.Response) error {
+			if resp.Header.Get("X-Metric") == "missing" {
+				return expected
 			}
-			if _, err := io.WriteString(w, "ok"); err != nil {
-				t.Fatalf("failed to write response: %v", err)
-			}
-		}))
-		defer server.Close()
-
-		probeFunc := NewHTTPProbe("docs", "", server.URL, nil)
-		if err := probeFunc(nil); err != nil {
-			t.Fatalf("expected nil error, got %v", err)
-		}
-	})
-
-	t.Run("non success status fails", func(t *testing.T) {
-		resp := &http.Response{
-			StatusCode: http.StatusServiceUnavailable,
-			Body:       io.NopCloser(strings.NewReader("oops")),
-		}
-		client := &stubHTTPClient{resp: resp}
-		probeFunc := NewHTTPProbe("docs", http.MethodHead, "https://example.invalid", client)
-
-		err := probeFunc(context.Background())
-		if err == nil {
-			t.Fatal("expected error when status not 2xx")
-		}
-		if client.lastReq == nil || client.lastReq.Method != http.MethodHead {
-			t.Fatalf("expected HEAD request, got %+v", client.lastReq)
-		}
-	})
-
-	t.Run("request failure is propagated", func(t *testing.T) {
-		sentinel := errors.New("network down")
-		client := &stubHTTPClient{err: sentinel}
-		probeFunc := NewHTTPProbe("docs", http.MethodGet, "https://example.invalid", client)
-
-		err := probeFunc(context.Background())
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !errors.Is(err, sentinel) {
-			t.Fatalf("expected wrapped sentinel, got %v", err)
-		}
-	})
-
-	t.Run("custom status expectation", func(t *testing.T) {
-		resp := &http.Response{
-			StatusCode: http.StatusTooManyRequests,
-			Body:       io.NopCloser(strings.NewReader("retry")),
-		}
-		client := &stubHTTPClient{resp: resp}
-		probeFunc := NewHTTPProbe(
-			"docs",
-			http.MethodGet,
-			"https://example.invalid",
-			client,
-			WithHTTPAllowedStatuses(http.StatusTooManyRequests),
-		)
-		if err := probeFunc(context.Background()); err != nil {
-			t.Fatalf("expected probe to accept 429, got %v", err)
-		}
-	})
-
-	t.Run("request mutator runs", func(t *testing.T) {
-		reqCapture := make(http.Header)
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			reqCapture = r.Header.Clone()
-		}))
-		defer server.Close()
-
-		probeFunc := NewHTTPProbe(
-			"docs",
-			http.MethodGet,
-			server.URL,
-			nil,
-			WithHTTPRequestMutator(func(req *http.Request) error {
-				req.Header.Set("Authorization", "Bearer test")
-				return nil
-			}),
-		)
-		if err := probeFunc(context.Background()); err != nil {
-			t.Fatalf("expected nil error, got %v", err)
-		}
-		if reqCapture.Get("Authorization") != "Bearer test" {
-			t.Fatalf("expected Authorization header to be set, got %q", reqCapture.Get("Authorization"))
-		}
-	})
-
-	t.Run("response validator failure bubbles up", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Metric", "missing")
-		}))
-		defer server.Close()
-
-		expected := errors.New("missing metric")
-		probeFunc := NewHTTPProbe(
-			"docs",
-			http.MethodGet,
-			server.URL,
-			nil,
-			WithHTTPResponseValidator(func(resp *http.Response) error {
-				if resp.Header.Get("X-Metric") == "missing" {
-					return expected
-				}
-				return nil
-			}),
-		)
-		err := probeFunc(context.Background())
-		if !errors.Is(err, expected) {
-			t.Fatalf("expected validator error, got %v", err)
-		}
-	})
+			return nil
+		}),
+	)
+	err := probeFunc(context.Background())
+	if !errors.Is(err, expected) {
+		t.Fatalf("expected validator error, got %v", err)
+	}
 }
