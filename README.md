@@ -76,6 +76,7 @@ resp := responder.NewResponder(
 infoHandler := info.NewInfoHandler(
     info.WithInfoResponder(resp),
     info.WithBaseURL("https://api.example.com"),
+    info.WithUIType(info.UIScalar), // Choose your preferred OpenAPI UI
     info.WithInfoProvider(func() any {
         return map[string]string{
             "version": version,
@@ -162,8 +163,13 @@ middleware with the built-in defaults.
 
 ## Health, Docs & Probes
 
-- **HTML docs**: An embedded Stoplight viewer (`info/assets/stoplight.html`)
-  serves your OpenAPI spec without extra tooling.
+- **HTML docs**: Multiple OpenAPI documentation UIs are supported out of the box:
+  - **Stoplight Elements** (default): `info/assets/stoplight.html`
+  - **Scalar**: Modern, interactive API documentation
+  - **SwaggerUI**: The classic OpenAPI documentation tool
+  - **Redoc**: Clean, responsive OpenAPI documentation
+  
+  Use `info.WithUIType()` to select your preferred UI (e.g., `info.WithUIType(info.UIScalar)`).
 - **JSON docs**: Provide a `SwaggerProvider` (or `OpenAPIProvider`) to serve the
   raw spec alongside the viewer.
 - **Readiness/Liveness**: Compose the built-in probes (`probe` package) or pass

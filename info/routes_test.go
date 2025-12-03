@@ -203,6 +203,7 @@ func TestInfoHandler_GetOpenAPIHTML(t *testing.T) {
 	t.Run("falls back to default data provider", testGetOpenAPIHTMLDefaultData)
 	t.Run("missing template returns problem response", testGetOpenAPIHTMLMissingTemplate)
 	t.Run("template execution errors are surfaced", testGetOpenAPIHTMLTemplateError)
+	t.Run("renders different UI types", testGetOpenAPIHTMLDifferentUITypes)
 }
 
 func testGetOpenAPIHTMLCustomData(t *testing.T) {
@@ -300,5 +301,63 @@ func testGetOpenAPIHTMLTemplateError(t *testing.T) {
 	problem := decodeProblemDetails(t, rr.Body.Bytes())
 	if !strings.Contains(problem.Detail, "render failure") {
 		t.Fatalf("expected detail to include render failure, got %q", problem.Detail)
+	}
+}
+
+func testGetOpenAPIHTMLDifferentUITypes(t *testing.T) {
+	t.Helper()
+	testCases := []struct {
+		name           string
+		uiType         UIType
+		expectedInBody string
+	}{
+		{
+			name:           "stoplight UI",
+			uiType:         UIStoplight,
+			expectedInBody: "@stoplight/elements",
+		},
+		{
+			name:           "scalar UI",
+			uiType:         UIScalar,
+			expectedInBody: "@scalar/api-reference",
+		},
+		{
+			name:           "swaggerui UI",
+			uiType:         UISwaggerUI,
+			expectedInBody: "swagger-ui-dist",
+		},
+		{
+			name:           "redoc UI",
+			uiType:         UIRedoc,
+			expectedInBody: "redoc",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := NewInfoHandler(
+				WithBaseURL("https://api.example.com"),
+				WithUIType(tc.uiType),
+			)
+			req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+			rr := httptest.NewRecorder()
+
+			handler.GetOpenAPIHTML(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+			}
+			if rr.Header().Get("Content-Type") != "text/html" {
+				t.Fatalf("expected text/html content type, got %s", rr.Header().Get("Content-Type"))
+			}
+			body := rr.Body.String()
+			if !strings.Contains(body, tc.expectedInBody) {
+				t.Fatalf("expected body to contain %q, but got: %s", tc.expectedInBody, body)
+			}
+			// Verify BaseURL is rendered in all templates (may be escaped in JSON)
+			if !strings.Contains(body, "https://api.example.com") && !strings.Contains(body, "https:\\/\\/api.example.com") {
+				t.Fatalf("expected body to contain BaseURL, but got: %s", body)
+			}
+		})
 	}
 }

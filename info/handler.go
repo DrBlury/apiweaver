@@ -47,6 +47,7 @@ type InfoHandler struct {
 	probeTimeout    time.Duration
 	livenessChecks  []ProbeFunc
 	readinessChecks []ProbeFunc
+	uiType          UIType
 }
 
 // NewInfoHandler constructs an InfoHandler with sensible defaults. Callers can
@@ -64,6 +65,7 @@ func NewInfoHandler(opts ...InfoOption) *InfoHandler {
 		openapiTemplate: defaultOpenAPITemplate,
 		dataProvider:    defaultTemplateDataProvider,
 		probeTimeout:    defaultProbeTimeout,
+		uiType:          UIStoplight,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -154,6 +156,26 @@ func WithLivenessChecks(checks ...ProbeFunc) InfoOption {
 func WithReadinessChecks(checks ...ProbeFunc) InfoOption {
 	return func(ih *InfoHandler) {
 		ih.readinessChecks = filterProbes(checks)
+	}
+}
+
+// WithUIType sets the OpenAPI documentation UI to use. Supported values are
+// UIStoplight (default), UIScalar, UISwaggerUI, and UIRedoc.
+func WithUIType(uiType UIType) InfoOption {
+	return func(ih *InfoHandler) {
+		ih.uiType = uiType
+		switch uiType {
+		case UIScalar:
+			ih.openapiTemplate = templateScalar
+		case UISwaggerUI:
+			ih.openapiTemplate = templateSwaggerUI
+		case UIRedoc:
+			ih.openapiTemplate = templateRedoc
+		case UIStoplight:
+			ih.openapiTemplate = templateStoplight
+		default:
+			ih.openapiTemplate = templateStoplight
+		}
 	}
 }
 
