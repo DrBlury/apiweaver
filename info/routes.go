@@ -76,3 +76,43 @@ func (ih *InfoHandler) GetOpenAPIHTML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 }
+
+// GetAsyncAPIJSON streams the configured AsyncAPI JSON document to the caller.
+func (ih *InfoHandler) GetAsyncAPIJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	bytes, err := ih.asyncapiProvider()
+	if err != nil {
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to load asyncapi spec")
+		return
+	}
+
+	if _, err = w.Write(bytes); err != nil {
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to write asyncapi response")
+		return
+	}
+}
+
+// GetAsyncAPIHTML renders an embedded AsyncAPI React Component viewer that fetches the AsyncAPI document from the JSON endpoint.
+func (ih *InfoHandler) GetAsyncAPIHTML(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+
+	if ih.asyncapiTemplate == nil {
+		err := errors.New("asyncapi template not configured")
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to render asyncapi template")
+		return
+	}
+
+	var data any
+	if ih.asyncapiDataProvider != nil {
+		data = ih.asyncapiDataProvider(r, ih.baseURL)
+	}
+	if data == nil {
+		data = defaultAsyncAPITemplateDataProvider(r, ih.baseURL)
+	}
+
+	if err := ih.asyncapiTemplate.Execute(w, data); err != nil {
+		ih.HandleAPIError(w, r, http.StatusInternalServerError, err, "failed to render asyncapi template")
+		return
+	}
+}

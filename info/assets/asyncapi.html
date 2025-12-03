@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>AsyncAPI Doc</title>
+    <link rel="stylesheet" href="https://unpkg.com/@asyncapi/react-component@latest/styles/default.min.css">
+  </head>
+  <body>
+    <div id="asyncapi"></div>
+
+    <script src="https://unpkg.com/@asyncapi/react-component@latest/browser/standalone/index.js"></script>
+    <script>
+      AsyncApiStandalone.render({
+        schema: {
+          url: '{{ .BaseURL }}/info/asyncapi.json',
+        },
+        config: {
+          show: {
+            sidebar: true,
+          }
+        },
+      }, document.getElementById('asyncapi'));
+    </script>
+  </body>
+</html>

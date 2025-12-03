@@ -17,6 +17,9 @@ var openapiHTMLSwaggerUI []byte
 //go:embed assets/redoc.html
 var openapiHTMLRedoc []byte
 
+//go:embed assets/asyncapi.html
+var asyncapiHTML []byte
+
 // UIType specifies which OpenAPI documentation UI to use.
 type UIType string
 
@@ -44,6 +47,10 @@ var (
 	templateRedoc = template.Must(
 		template.New("openapi-redoc").Parse(string(openapiHTMLRedoc)),
 	)
+	templateAsyncAPI = template.Must(
+		template.New("asyncapi").Parse(string(asyncapiHTML)),
+	)
 )
 
 var defaultOpenAPITemplate = templateStoplight
+var defaultAsyncAPITemplate = templateAsyncAPI

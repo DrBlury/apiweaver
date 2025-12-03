@@ -111,3 +111,54 @@ func ExampleInfoHandler_differentUITypes() {
 	// SwaggerUI: 200 true
 	// Redoc: 200 true
 }
+
+func ExampleInfoHandler_asyncAPI() {
+	handler := info.NewInfoHandler(
+		info.WithBaseURL("https://events.example.com"),
+		info.WithAsyncAPIProvider(func() ([]byte, error) {
+			return []byte(`{"asyncapi":"3.0.0","info":{"title":"Events API","version":"1.0.0"}}`), nil
+		}),
+	)
+
+	// Test AsyncAPI JSON endpoint
+	jsonRec := httptest.NewRecorder()
+	handler.GetAsyncAPIJSON(jsonRec, httptest.NewRequest(http.MethodGet, "/info/asyncapi.json", nil))
+	fmt.Println("JSON:", jsonRec.Code)
+	fmt.Println(strings.TrimSpace(jsonRec.Body.String()))
+
+	// Test AsyncAPI HTML endpoint
+	htmlRec := httptest.NewRecorder()
+	handler.GetAsyncAPIHTML(htmlRec, httptest.NewRequest(http.MethodGet, "/info/asyncapi.html", nil))
+	fmt.Println("HTML:", htmlRec.Code, strings.Contains(htmlRec.Body.String(), "@asyncapi/react-component"))
+
+	// Use the helper function to get the spec URL
+	fmt.Println("Spec URL:", info.AsyncAPISpecURL("https://events.example.com"))
+
+	// Output:
+	// JSON: 200
+	// {"asyncapi":"3.0.0","info":{"title":"Events API","version":"1.0.0"}}
+	// HTML: 200 true
+	// Spec URL: https://events.example.com/info/asyncapi.json
+}
+
+func ExampleInfoHandler_asyncAPICustomTemplate() {
+	handler := info.NewInfoHandler(
+		info.WithBaseURL("https://events.example.com"),
+		info.WithAsyncAPITemplate(template.Must(template.New("events").Parse(`<div>{{.EventsURL}}</div>`))),
+		info.WithAsyncAPITemplateData(func(r *http.Request, baseURL string) any {
+			return map[string]string{
+				"EventsURL": baseURL + "/info/asyncapi.json",
+			}
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/asyncapi", nil)
+	rr := httptest.NewRecorder()
+	handler.GetAsyncAPIHTML(rr, req)
+
+	fmt.Println(rr.Code)
+	fmt.Println(strings.TrimSpace(rr.Body.String()))
+	// Output:
+	// 200
+	// <div>https://events.example.com/info/asyncapi.json</div>
+}

@@ -34,7 +34,7 @@
 | Package | What it solves |
 | --- | --- |
 | `responder` | JSON rendering, error envelopes, request decoding, metadata + ULIDs. |
-| `info` | Status/version endpoints, OpenAPI JSON + HTML viewer, build metadata. |
+| `info` | Status/version endpoints, OpenAPI + AsyncAPI JSON + HTML viewers, build metadata. |
 | `probe` | Ready-made checks for databases or custom closures wired to HTTP. |
 | `jsonutil` | Tiny helpers around sonic for fast (un)marshalling. |
 | `router` | ServeMux with OpenAPI validation, CORS, timeout, and logging defaults via functional options. |
@@ -118,7 +118,7 @@ Refer to the following table to jump into a concrete scenario:
 
 | Package | Example Highlights |
 | --- | --- |
-| `info` | Wires `InfoHandler` with custom base URL, swagger provider, and probes, then exercises `/healthz` + `/version`. |
+| `info` | Wires `InfoHandler` with custom base URL, swagger provider, and probes, then exercises `/healthz` + `/version`. Also demonstrates AsyncAPI support for event-driven APIs. |
 | `jsonutil` | Demonstrates struct marshal/unmarshal plus streaming `Encode`/`Decode`. |
 | `responder` | End-to-end handler showing request decoding, validation, custom error classification, and structured problem payloads. |
 | `router` | Builds a mux with OpenAPI validation, logger, tuned CORS, timeout, and prepend/append middlewares. |
@@ -168,8 +168,14 @@ middleware with the built-in defaults.
   - **Scalar**: Modern, interactive API documentation
   - **SwaggerUI**: The classic OpenAPI documentation tool
   - **Redoc**: Clean, responsive OpenAPI documentation
-  
+
   Use `info.WithUIType()` to select your preferred UI (e.g., `info.WithUIType(info.UIScalar)`).
+- **AsyncAPI docs**: For event-driven APIs, AsyncAPI documentation is also supported:
+  - Use `info.WithAsyncAPIProvider()` to supply your AsyncAPI spec
+  - Use `info.WithAsyncAPITemplate()` for custom HTML templates
+  - Use `info.WithAsyncAPITemplateData()` for custom template data
+  - Default template uses [AsyncAPI React Component](https://github.com/asyncapi/asyncapi-react)
+  - Use `info.AsyncAPISpecURL(baseURL)` helper to construct spec URLs
 - **JSON docs**: Provide a `SwaggerProvider` (or `OpenAPIProvider`) to serve the
   raw spec alongside the viewer.
 - **Readiness/Liveness**: Compose the built-in probes (`probe` package) or pass

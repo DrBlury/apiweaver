@@ -20,6 +20,11 @@ type InfoProvider func() any
 // generated at build time.
 type SwaggerProvider func() ([]byte, error)
 
+// AsyncAPIProvider returns the raw AsyncAPI document that should be rendered by
+// the AsyncAPI documentation endpoints. It is commonly backed by an embedded
+// JSON or YAML file generated at build time.
+type AsyncAPIProvider func() ([]byte, error)
+
 // InfoOption follows the functional options pattern used by NewInfoHandler to
 // configure optional collaborators such as the responder, base URL, and
 // information providers.
@@ -28,6 +33,10 @@ type InfoOption func(*InfoHandler)
 // TemplateDataProvider allows callers to customise the data payload passed to
 // the OpenAPI HTML template at render time.
 type TemplateDataProvider func(r *http.Request, baseURL string) any
+
+// AsyncAPITemplateDataProvider allows callers to customise the data payload
+// passed to the AsyncAPI HTML template at render time.
+type AsyncAPITemplateDataProvider func(r *http.Request, baseURL string) any
 
 const defaultProbeTimeout = 2 * time.Second
 
@@ -39,15 +48,18 @@ type ProbeFunc = probe.Func
 // that expose build information, status checks, and a pre-built HTML UI.
 type InfoHandler struct {
 	*responder.Responder
-	baseURL         string
-	infoProvider    InfoProvider
-	swaggerProvider SwaggerProvider
-	openapiTemplate *template.Template
-	dataProvider    TemplateDataProvider
-	probeTimeout    time.Duration
-	livenessChecks  []ProbeFunc
-	readinessChecks []ProbeFunc
-	uiType          UIType
+	baseURL              string
+	infoProvider         InfoProvider
+	swaggerProvider      SwaggerProvider
+	openapiTemplate      *template.Template
+	dataProvider         TemplateDataProvider
+	asyncapiProvider     AsyncAPIProvider
+	asyncapiTemplate     *template.Template
+	asyncapiDataProvider AsyncAPITemplateDataProvider
+	probeTimeout         time.Duration
+	livenessChecks       []ProbeFunc
+	readinessChecks      []ProbeFunc
+	uiType               UIType
 }
 
 // NewInfoHandler constructs an InfoHandler with sensible defaults. Callers can
@@ -64,8 +76,13 @@ func NewInfoHandler(opts ...InfoOption) *InfoHandler {
 		},
 		openapiTemplate: defaultOpenAPITemplate,
 		dataProvider:    defaultTemplateDataProvider,
-		probeTimeout:    defaultProbeTimeout,
-		uiType:          UIStoplight,
+		asyncapiProvider: func() ([]byte, error) {
+			return nil, errors.New("asyncapi provider not configured")
+		},
+		asyncapiTemplate:     defaultAsyncAPITemplate,
+		asyncapiDataProvider: defaultAsyncAPITemplateDataProvider,
+		probeTimeout:         defaultProbeTimeout,
+		uiType:               UIStoplight,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -179,7 +196,50 @@ func WithUIType(uiType UIType) InfoOption {
 	}
 }
 
+// WithAsyncAPIProvider sets the source of the AsyncAPI JSON document that backs
+// the AsyncAPI documentation endpoints.
+func WithAsyncAPIProvider(provider AsyncAPIProvider) InfoOption {
+	return func(ih *InfoHandler) {
+		if provider != nil {
+			ih.asyncapiProvider = provider
+		}
+	}
+}
+
+// WithAsyncAPITemplate injects a custom html/template instance used to render
+// the AsyncAPI viewer page. Callers can parse templates from disk or embed them
+// via go:embed before passing them in.
+func WithAsyncAPITemplate(tmpl *template.Template) InfoOption {
+	return func(ih *InfoHandler) {
+		if tmpl != nil {
+			ih.asyncapiTemplate = tmpl
+		}
+	}
+}
+
+// WithAsyncAPITemplateData overrides the template data provider that runs for
+// each request to the AsyncAPI HTML endpoint.
+func WithAsyncAPITemplateData(provider AsyncAPITemplateDataProvider) InfoOption {
+	return func(ih *InfoHandler) {
+		if provider != nil {
+			ih.asyncapiDataProvider = provider
+		}
+	}
+}
+
+// AsyncAPISpecURL returns the URL path where the AsyncAPI JSON spec is served.
+// This helper can be used to construct links to the AsyncAPI documentation.
+func AsyncAPISpecURL(baseURL string) string {
+	return baseURL + "/info/asyncapi.json"
+}
+
 func defaultTemplateDataProvider(_ *http.Request, baseURL string) any {
+	return map[string]any{
+		"BaseURL": baseURL,
+	}
+}
+
+func defaultAsyncAPITemplateDataProvider(_ *http.Request, baseURL string) any {
 	return map[string]any{
 		"BaseURL": baseURL,
 	}
